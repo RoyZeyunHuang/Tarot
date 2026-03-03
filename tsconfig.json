@@ -36,6 +36,7 @@
   ],
   "exclude": [
     "node_modules",
-    "tarot-app-v2.tsx"
+    "tarot-app-v2.tsx",
+    "Import tsx"
   ]
 }
