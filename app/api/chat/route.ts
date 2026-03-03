@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+export const maxDuration = 60; // Vercel Pro: 60s; Hobby: capped at 10s (upgrade if needed)
+
 interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+export const maxDuration = 30;
+
 // Real tarot-reader decision-tree recommender.
 // Returns catId + spreadId matching the CATEGORIES/SPREADS constants in TarotApp.tsx.
 
