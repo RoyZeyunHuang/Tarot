@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-export const maxDuration = 60; // Vercel Pro: 60s; Hobby: capped at 10s (upgrade if needed)
+export const maxDuration = 60;
+
+const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
+const ANTHROPIC_VERSION = '2023-06-01';
+const DEFAULT_MODEL = 'claude-sonnet-4-5';
 
 interface Message {
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant';
   content: string;
 }
 
@@ -16,9 +20,9 @@ interface RequestBody {
 }
 
 export async function POST(req: NextRequest) {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    console.error('[/api/chat] OPENAI_API_KEY is not set');
+    console.error('[/api/chat] ANTHROPIC_API_KEY is not set');
     return NextResponse.json({ error: 'Server configuration error: API key not configured' }, { status: 500 });
   }
 
@@ -31,19 +35,31 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: '`messages` must be a non-empty array' }, { status: 400 });
   }
 
-  const openaiMessages: Message[] = [
-    ...(system ? [{ role: 'system' as const, content: system }] : []),
-    ...messages.filter((m) => m.role === 'user' || m.role === 'assistant'),
-  ];
+  const filteredMessages = messages.filter((m) => m.role === 'user' || m.role === 'assistant');
+  if (filteredMessages.length === 0) {
+    return NextResponse.json({ error: 'At least one user message is required' }, { status: 400 });
+  }
+
+  const anthropicBody = {
+    model: model ?? DEFAULT_MODEL,
+    max_tokens: max_tokens ?? 3500,
+    ...(system ? { system } : {}),
+    messages: filteredMessages,
+    ...(doStream ? { stream: true } : {}),
+  };
 
   // ── Streaming mode ──────────────────────────────────────────────────────────
   if (doStream) {
     let upstream: Response;
     try {
-      upstream = await fetch('https://api.openai.com/v1/chat/completions', {
+      upstream = await fetch(ANTHROPIC_API_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({ model: model ?? 'gpt-4o', max_tokens: max_tokens ?? 3500, stream: true, messages: openaiMessages }),
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': ANTHROPIC_VERSION,
+        },
+        body: JSON.stringify(anthropicBody),
       });
     } catch (err) {
       console.error('[/api/chat] Network error:', err);
@@ -51,10 +67,12 @@ export async function POST(req: NextRequest) {
     }
 
     if (!upstream.ok) {
+      const errData = await upstream.json().catch(() => ({})) as Record<string, unknown>;
+      console.error('[/api/chat] Anthropic error:', upstream.status, errData);
       return NextResponse.json({ error: 'Upstream error' }, { status: upstream.status });
     }
 
-    // Forward SSE delta content as plain text chunks
+    // Forward Anthropic SSE content_block_delta as plain text chunks
     const readable = new ReadableStream({
       async start(controller) {
         const reader = upstream.body!.getReader();
@@ -65,12 +83,19 @@ export async function POST(req: NextRequest) {
             if (done) break;
             const text = dec.decode(value, { stream: true });
             for (const line of text.split('\n')) {
-              if (!line.startsWith('data: ') || line === 'data: [DONE]') continue;
+              if (!line.startsWith('data: ')) continue;
+              const data = line.slice(6).trim();
+              if (!data || data === '[DONE]') continue;
               try {
-                const parsed = JSON.parse(line.slice(6)) as { choices?: Array<{ delta?: { content?: string } }> };
-                const chunk = parsed.choices?.[0]?.delta?.content;
-                if (chunk) controller.enqueue(new TextEncoder().encode(chunk));
-              } catch { /* skip malformed SSE lines */ }
+                const parsed = JSON.parse(data) as {
+                  type?: string;
+                  delta?: { type?: string; text?: string };
+                };
+                if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
+                  const chunk = parsed.delta.text;
+                  if (chunk) controller.enqueue(new TextEncoder().encode(chunk));
+                }
+              } catch { /* skip malformed lines */ }
             }
           }
         } finally {
@@ -82,13 +107,17 @@ export async function POST(req: NextRequest) {
     return new Response(readable, { headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
   }
 
-  // ── Non-streaming mode (fallback) ────────────────────────────────────────────
+  // ── Non-streaming mode ───────────────────────────────────────────────────────
   let upstreamRes: Response;
   try {
-    upstreamRes = await fetch('https://api.openai.com/v1/chat/completions', {
+    upstreamRes = await fetch(ANTHROPIC_API_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-      body: JSON.stringify({ model: model ?? 'gpt-4o', max_tokens: max_tokens ?? 3500, messages: openaiMessages }),
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': ANTHROPIC_VERSION,
+      },
+      body: JSON.stringify(anthropicBody),
     });
   } catch (err) {
     console.error('[/api/chat] Network error:', err);
@@ -97,13 +126,12 @@ export async function POST(req: NextRequest) {
 
   if (!upstreamRes.ok) {
     const errData = await upstreamRes.json().catch(() => ({})) as Record<string, unknown>;
-    const errMsg = typeof errData?.error === 'object' && errData.error !== null
-      ? (errData.error as Record<string, unknown>).message ?? 'Upstream API error'
-      : 'Upstream API error';
+    const errMsg = (errData?.error as Record<string, unknown>)?.message ?? 'Upstream API error';
+    console.error('[/api/chat] Anthropic error:', upstreamRes.status, errMsg);
     return NextResponse.json({ error: String(errMsg) }, { status: upstreamRes.status });
   }
 
-  const data = await upstreamRes.json() as { choices?: Array<{ message?: { content?: string } }> };
-  const text = (data.choices?.[0]?.message?.content ?? '').trim();
+  const data = await upstreamRes.json() as { content?: Array<{ text?: string }> };
+  const text = (data.content ?? []).map((b) => b.text ?? '').join('').trim();
   return NextResponse.json({ text });
 }

@@ -40,10 +40,10 @@ function buildSmartPrompt(catId,profile,history,patterns){
   const focus=catId?TAG_FOCUS[catId]+"。":"";
   // JSONL schema: two JSON objects on separate lines, parsed progressively while streaming
   const schema=`以JSONL格式输出两行（每行一个完整JSON对象，对象内所有字符串不含真正的换行符）：
-第1行只含cardReadings：{"cardReadings":[{"position":"牌位","card":"牌名","core":"从牌面图像出发解读：描述你在这张牌里看到的画面与符号，它们如何呼应问卜者的处境（3-4句，有画面感）","symbol":"点出一个最关键的视觉符号及其隐喻（1-2句，具体而诗意）"}]}
-第2行含其余字段：{"synthesis":"综合推演不少于200字：深度剖析问卜者当下的心理结构，说出那些藏在问题背后的真实心理，像一面镜子，以「关于你问的」开头","energy":"当前核心能量（2句）","trend":"未来趋势（2句）","action":"具体可操作的行动建议（2-3句）","timeWindow":"时间窗口（1句）","closing":"温暖收尾（1句）","nextQuestion":"作为塔罗师，你在这次解读中最想继续深挖的一个问题——不是重复原问题，而是指向他们尚未触碰的内层（1句话，以问句形式，中文）","profileUpdate":{"themes":["1-2个核心主题关键词"],"emotionalTone":"情绪基调一词"}}
+第1行只含cardReadings：{"cardReadings":[{"position":"牌位","card":"牌名","core":"把牌面意象锚定到问卜者的具体问题上：先用1句描述牌面最核心的画面，然后直接说出这张牌在这个问题语境下意味着什么具体处境或心理状态——不是牌义解释，而是一个具体的场景，让人读完觉得「这说的就是我此刻的情况」。禁止出现能套在任何人身上的泛泛句子（3-4句）","symbol":"点出一个最关键的视觉符号及其隐喻（1-2句，具体而诗意）"}]}
+第2行含其余字段：{"synthesis":"综合推演不少于200字：以「关于你问的」开头。每一句话都必须对得上问卜者的具体问题，禁止出现可以套在任何人任何问题上的泛泛表达。要做到：①点出这个人在这个问题上最可能的具体处境或行为模式，②说出他们自己可能没意识到但牌面揭示的内在矛盾，③把多张牌的意象串联成一个针对这个问题的完整叙事。像一个真正了解对方处境的人在说话，而不是在背牌义","energy":"当前核心能量（2句）","trend":"未来趋势（2句）","action":"具体可操作的行动建议（2-3句）","timeWindow":"时间窗口（1句）","closing":"温暖收尾（1句）","nextQuestion":"作为塔罗师，你在这次解读中最想继续深挖的一个问题——不是重复原问题，而是指向他们尚未触碰的内层（1句话，以问句形式，中文）","profileUpdate":{"themes":["1-2个核心主题关键词"],"emotionalTone":"情绪基调一词"}}
 严格要求：只输出这两行JSON，无其他文字，每行必须是合法且完整的JSON对象。`;
-  let sys="你是一位拥有20年经验的资深塔罗占卜师，擅长结合透特塔罗与韦特塔罗的精髓，同时具备荣格心理学与深层叙事治疗的视角。你用牌面的图像说话：每一张牌都是一幅画，你从画中读出问卜者的处境与内心。你的语言有画面感、有智慧、温暖而深刻，能触及人最不愿正视却最需要听到的部分。"+focus+"牌面解析时：请描述牌面的意象与符号（人物姿态、颜色、场景细节），说明这个画面如何照应问卜者的问题，让人感受到与牌的真实连接。综合解读时（synthesis字段）：这是整个解读最重要的部分，必须不少于200字。要像一位真正了解对方的人在说话——不是泛泛而谈，而是针对这个人、这个问题、这些牌，说出那些埋在问题背后的真实心理：他们真正在意什么、什么在内心深处拉扯他们、他们用什么方式保护自己、这背后藏着什么更深的恐惧或渴望。把所有牌的意象编织成一个有力的整体叙事，让人读完有被看见、被触动的感觉。";
+  let sys="你是一位拥有20年经验的资深塔罗占卜师，擅长结合透特塔罗与韦特塔罗的精髓，同时具备荣格心理学与深层叙事治疗的视角。你用牌面的图像说话：每一张牌都是一幅画，你从画中读出问卜者的处境与内心。你的语言有画面感、有智慧、温暖而深刻，能触及人最不愿正视却最需要听到的部分。"+focus+"牌面解析时：请描述牌面的意象与符号（人物姿态、颜色、场景细节），说明这个画面如何照应问卜者的问题，让人感受到与牌的真实连接。综合解读时（synthesis字段）：这是整个解读最重要的部分，必须不少于200字。要像一位真正了解对方的人在说话——不是泛泛而谈，而是针对这个人、这个问题、这些牌，说出那些埋在问题背后的真实心理：他们真正在意什么、什么在内心深处拉扯他们、他们用什么方式保护自己、这背后藏着什么更深的恐惧或渴望。把所有牌的意象编织成一个有力的整体叙事，让人读完有被看见、被触动的感觉。每次解读都必须让人觉得是专门为他们这个问题写的，而不是换个名字也能用的模板回答。";
   if(profile&&profile.totalReadings>0){
     sys+="\n\n【问卜者档案】这位问卜者已进行过"+profile.totalReadings+"次占卜，首次占卜于"+(profile.firstReadingDate||"近期")+"。";
     const topCats=Object.entries(profile.topCategories||{}).sort((a,b)=>b[1]-a[1]).slice(0,3);
@@ -398,7 +398,7 @@ export default function TarotApp(){
     var smartPrompt=buildSmartPrompt(category,profile,relevantHist,pats||detectedPatterns);
     var partial={};
     try{
-      var res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"gpt-4o",max_tokens:3500,stream:true,system:smartPrompt,messages:[{role:"user",content:"问卜者的问题："+fullQuestion+"\n牌阵："+spread.label+"\n抽到的牌："+cardsList}]})});
+      var res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:3500,stream:true,system:smartPrompt,messages:[{role:"user",content:"问卜者的问题："+fullQuestion+"\n牌阵："+spread.label+"\n抽到的牌："+cardsList}]})});
       if(!res.ok)throw new Error("API error "+res.status);
       var reader=res.body.getReader();
       var dec=new TextDecoder();
